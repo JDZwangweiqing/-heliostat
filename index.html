@@ -839,6 +839,24 @@ function renderChart(cv) {
     if (aRun) drawRun(aRun, aOn, 'azi');
   });
   ctx.setLineDash([]);
+  // 当前时刻红点：每条可见曲线在当前时间位置画一个小红点，随时间推移沿曲线运动
+  const ssNow0 = sunState();
+  const dotDim = ssNow0.elv > 0 && ssNow0.elv < WORK_MIN;   // 日出后未达工作高度角时红点变淡
+  state.sel.forEach((mIdx, slot) => {
+    const p = poseAt(mIdx, state.timeMin);
+    if (isNaN(p.tilt)) return;
+    const dx = X(state.timeMin/60);
+    const drawDot = (y) => {
+      ctx.save();
+      if (dotDim) ctx.globalAlpha = 0.45;
+      ctx.beginPath(); ctx.arc(dx, y, 3.2*s, 0, Math.PI*2);
+      ctx.fillStyle = '#e53935'; ctx.fill();
+      ctx.lineWidth = 1.2*s; ctx.strokeStyle = '#fff'; ctx.stroke();
+      ctx.restore();
+    };
+    if (state.showElv[slot]) drawDot(YE(p.tilt));
+    if (state.showAzi[slot]) drawDot(YA(p.face));
+  });
   // 当前时刻：小太阳标记（不画红色竖线；日出后显示，未达工作高度角时亮度降 50%，日出前不显示）
   const ssNow = sunState();
   if (ssNow.elv > 0) {
