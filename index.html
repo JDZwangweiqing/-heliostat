@@ -185,12 +185,12 @@ const SEL_COLORS = ['#1565c0', '#e8821e', '#2e9e5b', '#9c27b0'];   // 4 个定�
 const state = {
   lon: 101.8, lat: 36.6, date: '2026-06-21',
   timeMin: 600,
-  viewAzi: 28, viewElv: 34, zoom: 1,
+  viewAzi: 190, viewElv: 21, zoom: 1,   // 默认视角：南侧偏东、垂直视角 21°（东在左、西在右、北在远上方）
   playing: false,
-  sel: [0, 15, 37, 47],        // 同时选中 4 个定日镜的索引
+  sel: [5, 0, 30, 41],         // 默认选中：镜1 内圈-6号、镜2 内圈-1号、镜3 外圈-5号、镜4 外圈-16号
   selSlot: 0,                  // 场景点击时轮换写入的槽位
-  showElv: [true, true, true, true],   // 每镜仰角曲线显示开关
-  showAzi: [true, true, true, true]    // 每镜方位角曲线显示开关
+  showElv: [true, true, true, true],    // 每镜仰角曲线显示开关（默认勾选）
+  showAzi: [false, false, false, false] // 每镜方位角曲线显示开关（默认不勾选）
 };
 // 默认使用终端当前日期与时间
 (function () {
