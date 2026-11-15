@@ -54,6 +54,16 @@
   .lgitem input { accent-color: #1a5b96; margin: 0; }
   #styleNote { font-size: 10px; color: #667788; margin-top: 2px; }
 
+  /* 镜面特写 3D 浮动窗口（位于 3D 区内，默认收起，可拖动） */
+  #zoomFold { position: absolute; right: 14px; top: 12px; z-index: 21; }
+  #zoomFloat { position: absolute; right: 14px; top: 40px; width: 430px; z-index: 20; background: #fff; border-radius: 10px; box-shadow: 0 6px 24px rgba(20,60,100,.35); padding: 6px 10px 10px; font-size: 12px; color: #234; }
+  #zoomFloat h2 { font-size: 13px; color: #1a5b96; border-left: 4px solid #f5b301; padding-left: 6px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; }
+  #zoomFloat h2 button { pointer-events: auto; }
+  #zoomTabs { display: flex; gap: 6px; margin: 4px 0 5px; }
+  #zoomTabs button { flex: 1; border: 1.5px solid; border-radius: 5px; background: #f4f9fd; font-size: 11px; padding: 3px 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #zoomTabs button:disabled { cursor: default; background: #eef1f4; color: #aabbcc !important; border-color: #ccd6df !important; }
+  #zoomCanvas { width: 100%; height: 300px; display: block; border-radius: 6px; cursor: grab; }
+
   /* 控件（紧凑排列，面板高度约为初版 5/6） */
   .row { display: flex; align-items: center; justify-content: space-between; margin: 5px 0; gap: 5px; }
   .row label { color: #345; white-space: nowrap; font-size: 12px; }
@@ -86,6 +96,12 @@
   <div id="sceneWrap">
     <canvas id="scene"></canvas>
     <div id="elvCtl"><label>垂直视角</label><input type="range" id="elvSlider" min="-15" max="90" step="1" value="34"><span class="val" id="elvVal">34°</span></div>
+    <button class="foldBtn" id="zoomFold">镜面特写 &#9654;</button>
+    <div id="zoomFloat" style="display:none">
+      <h2>定日镜运动特写 <span><button class="foldBtn" id="zoomClose">收起 &#9650;</button></span></h2>
+      <div id="zoomTabs"></div>
+      <canvas id="zoomCanvas"></canvas>
+    </div>
     <div id="hint">黄色光线为平行入射与反射聚光光路 · 太阳位置按 NOAA 天文算法计算（高度角&ge;10°定日镜工作）· 点击镜面将其加入右侧曲线</div>
   </div>
 
@@ -187,7 +203,7 @@ const state = {
   timeMin: 600,
   viewAzi: 190, viewElv: 21, zoom: 1,   // 默认视角：南侧偏东、垂直视角 21°（东在左、西在右、北在远上方）
   playing: false,
-  sel: [5, 0, 30, 41],         // 默认选中：镜1 内圈-6号、镜2 内圈-1号、镜3 外圈-5号、镜4 外圈-16号
+  sel: [47, null, null, null], // 默认只选择镜1（外圈-22号），镜2/3/4 为未选择状态（null）
   selSlot: 0,                  // 场景点击时轮换写入的槽位
   showElv: [true, true, true, true],    // 每镜仰角曲线显示开关（默认勾选）
   showAzi: [false, false, false, false] // 每镜方位角曲线显示开关（默认不勾选）
@@ -637,6 +653,7 @@ function drawScene() {
   }
   // 选中镜的地面转动方向箭头：地面标记，深度比所在镜基座略远，不遮挡上方镜面与塔
   state.sel.forEach((mIdx, slot) => {
+    if (mIdx == null) return;
     const fn = makeRotationArc(mIdx, slot);
     if (fn) items.push({ dep: P([mirrors[mIdx].x, mirrors[mIdx].y, 0]).dep + 0.5, draw: fn });
   });
@@ -787,6 +804,7 @@ function renderChart(cv) {
   // 连续路径绘制：虚线相位跨采样点连续，才会呈现真正的 30/15 虚线段
   const step = 4;
   state.sel.forEach((mIdx, slot) => {
+    if (mIdx == null) return;   // 未选择槽位不绘制曲线
     const color = SEL_COLORS[slot];
     const drawRun = (pts, on, kind) => {
       if (pts.length < 2) return;
@@ -843,6 +861,7 @@ function renderChart(cv) {
   const ssNow0 = sunState();
   const dotDim = ssNow0.elv > 0 && ssNow0.elv < WORK_MIN;   // 日出后未达工作高度角时红点变淡
   state.sel.forEach((mIdx, slot) => {
+    if (mIdx == null) return;
     const p = poseAt(mIdx, state.timeMin);
     if (isNaN(p.tilt)) return;
     const dx = X(state.timeMin/60);
@@ -895,13 +914,14 @@ function update() {
   const sh = Math.floor(ss.solarT), sm = Math.round((ss.solarT - sh)*60);
   document.getElementById('rSolar').textContent = `${(sh + Math.floor(sm/60) + 24)%24}:${String(sm%60).padStart(2,'0')}`;
   document.getElementById('rState').textContent = ss.working ? '聚光中' : (ss.elv > 0 ? '低于阈值停用' : '夜间');
-  // 4 个选中镜当前值
+  // 4 个选中镜当前值（未选择的槽位显示"未选择"）
   document.getElementById('selInfo').innerHTML = state.sel.map((mIdx, slot) => {
+    if (mIdx == null) return `<span style="color:#9aa7b2;font-weight:bold">镜${slot+1}</span>：未选择`;
     const p = poseAt(mIdx, state.timeMin);
     const tv = isNaN(p.tilt) ? '停用' : `仰角 ${p.tilt.toFixed(1)}°　方位角 ${p.face.toFixed(1)}°`;
     return `<span style="color:${SEL_COLORS[slot]};font-weight:bold">镜${slot+1} ${mirrors[mIdx].id}</span>：${tv}`;
   }).join('<br>');
-  drawScene(); drawPlan(); drawChart();
+  drawScene(); drawPlan(); drawChart(); drawZoom();
 }
 
 /* ============ 交互 ============ */
@@ -917,14 +937,20 @@ document.getElementById('lat').addEventListener('input', e => { state.lat = pars
 document.getElementById('date').addEventListener('input', e => { if (e.target.value) { state.date = e.target.value; update(); } });
 document.getElementById('time').addEventListener('input', e => { state.timeMin = +e.target.value; state.playing = false; update(); });
 
-// 4 个定日镜选择下拉框
+// 4 个定日镜选择下拉框（支持"未选择"空槽位）
 const selSels = [0,1,2,3].map(k => document.getElementById('sel'+k));
+selSels.forEach(s => {
+  const o = document.createElement('option');
+  o.value = ''; o.textContent = '未选择';
+  s.appendChild(o);
+});
 mirrors.forEach((m, i) => {
   selSels.forEach(s => { const o = document.createElement('option'); o.value = i; o.textContent = m.id; s.appendChild(o); });
 });
 function syncSelSels() {
-  state.sel.forEach((v, k) => selSels[k].value = v);
+  state.sel.forEach((v, k) => selSels[k].value = v == null ? '' : String(v));
   buildLegend();
+  if (typeof buildZoomTabs === 'function') buildZoomTabs();
 }
 // HTML 图例：每镜后带仰角/方位角显示复选框（原窗口与放大窗口共用）
 function buildLegend() {
@@ -933,6 +959,7 @@ function buildLegend() {
     if (!lg) return;
     lg.innerHTML = '';
     state.sel.forEach((mIdx, slot) => {
+      if (mIdx == null) return;   // 未选择槽位不出现在图例中
       const d = document.createElement('div');
       d.className = 'lgitem';
       d.innerHTML =
@@ -959,13 +986,16 @@ document.getElementById('legendBig').addEventListener('change', e => {
   buildLegend(); drawChart();
 });
 syncSelSels();
-selSels.forEach((s, k) => s.addEventListener('change', e => { state.sel[k] = +e.target.value; syncSelSels(); update(); }));
+selSels.forEach((s, k) => s.addEventListener('change', e => { state.sel[k] = e.target.value === '' ? null : +e.target.value; syncSelSels(); update(); }));
 
-// 选镜：轮换写入 4 个槽位（场景与平面图共用）
+// 选镜：优先填入第一个"未选择"槽位，已选满则轮换写入（场景与平面图共用）
 function assignSlot(idx) {
   const exist = state.sel.indexOf(idx);
   if (exist >= 0) { state.selSlot = exist; }        // 已选中则下次覆盖该槽
-  else { state.selSlot = (state.selSlot + 1) % 4; }
+  else {
+    const nul = state.sel.indexOf(null);
+    state.selSlot = nul >= 0 ? nul : (state.selSlot + 1) % 4;
+  }
   state.sel[state.selSlot] = idx;
   syncSelSels(); update();
 }
@@ -1048,6 +1078,399 @@ document.getElementById('planClose').addEventListener('click', () => togglePlan(
   });
   window.addEventListener('mouseup', () => cd = null);
 })();
+
+/* ============ 镜面特写 3D 窗口（默认收起，可切换显示镜1~镜4 任一选中镜的运动） ============ */
+const zoomFloat = document.getElementById('zoomFloat');
+state.zoomSlot = 0;
+state.zoomCam = [null, null, null, null];   // 各槽位手动观察视角 {azi,elv,dist}，null = 默认沿镜面法线
+function initZoomCam(slot) {   // 首次拖动时以当前默认视角为起点
+  if (slot == null || slot < 0) return null;
+  if (!state.zoomCam[slot]) {
+    const m = mirrors[state.sel[slot]];
+    const pose = mirrorPose(m, sunState());
+    const n0 = pose ? pose.n : [0, 0.3, 0.9];
+    state.zoomCam[slot] = {
+      azi: Math.atan2(n0[0], n0[1]) * 180/Math.PI,
+      elv: Math.min(80, Math.max(12, Math.asin(Math.max(-1, Math.min(1, n0[2])))*180/Math.PI + 8)),
+      dist: 42,
+    };
+  }
+  return state.zoomCam[slot];
+}
+function zoomActiveSlot() {   // 当前特写槽位（若为未选择则回退到第一个已选槽位）
+  if (state.sel[state.zoomSlot] != null) return state.zoomSlot;
+  const i = state.sel.findIndex(v => v != null);
+  return i >= 0 ? i : -1;
+}
+function buildZoomTabs() {
+  const tabs = document.getElementById('zoomTabs');
+  if (!tabs) return;
+  tabs.innerHTML = '';
+  state.sel.forEach((mIdx, slot) => {
+    const b = document.createElement('button');
+    const dis = mIdx == null;
+    b.textContent = `镜${slot+1}` + (dis ? '（未选择）' : ' ' + mirrors[mIdx].id);
+    b.disabled = dis;
+    b.style.borderColor = SEL_COLORS[slot];
+    b.style.color = dis ? '#aabbcc' : SEL_COLORS[slot];
+    if (slot === state.zoomSlot && !dis) { b.style.background = SEL_COLORS[slot]; b.style.color = '#fff'; }
+    b.onclick = () => { state.zoomSlot = slot; buildZoomTabs(); drawZoom(); };
+    tabs.appendChild(b);
+  });
+}
+function toggleZoom(show) {
+  zoomFloat.style.display = show ? 'block' : 'none';
+  document.getElementById('zoomFold').innerHTML = show ? '镜面特写 &#9650;' : '镜面特写 &#9654;';
+  if (show) requestAnimationFrame(drawZoom);
+}
+document.getElementById('zoomFold').addEventListener('click', () => toggleZoom(zoomFloat.style.display === 'none'));
+document.getElementById('zoomClose').addEventListener('click', () => toggleZoom(false));
+
+// 特写画布：拖动旋转观察视角、滚轮缩放、双击复位到默认（正对反光面）
+(function () {
+  const cv = document.getElementById('zoomCanvas');
+  let zd = null;
+  cv.addEventListener('mousedown', e => {
+    const slot = zoomActiveSlot();
+    const cam = initZoomCam(slot);
+    if (!cam) return;
+    zd = { x: e.clientX, y: e.clientY, cam };
+    cv.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!zd) return;
+    zd.cam.azi -= (e.clientX - zd.x) * 0.55;                                       // 水平环绕
+    zd.cam.elv = Math.min(88, Math.max(-8, zd.cam.elv + (e.clientY - zd.y) * 0.45)); // 垂直俯仰
+    zd.x = e.clientX; zd.y = e.clientY;
+    drawZoom();
+  });
+  window.addEventListener('mouseup', () => { if (zd) { zd = null; cv.style.cursor = 'grab'; } });
+  cv.addEventListener('wheel', e => {
+    const slot = zoomActiveSlot();
+    const cam = initZoomCam(slot);
+    if (!cam) return;
+    cam.dist = Math.min(130, Math.max(16, cam.dist * (1 + Math.sign(e.deltaY) * 0.14)));
+    e.preventDefault();
+    drawZoom();
+  }, { passive: false });
+  cv.addEventListener('dblclick', () => {                 // 双击复位为默认视角
+    const slot = zoomActiveSlot();
+    if (slot >= 0) { state.zoomCam[slot] = null; drawZoom(); }
+  });
+})();
+// 特写窗口拖动（限定在 3D 区范围内）
+(function () {
+  const bar = zoomFloat.querySelector('h2');
+  const wrap = document.getElementById('sceneWrap');
+  let zd = null;
+  bar.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'BUTTON') return;
+    const r = zoomFloat.getBoundingClientRect();
+    zd = { ox: e.clientX - r.left, oy: e.clientY - r.top };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!zd) return;
+    const wr = wrap.getBoundingClientRect();
+    zoomFloat.style.left = Math.min(wr.width - 60, Math.max(0, e.clientX - wr.left - zd.ox)) + 'px';
+    zoomFloat.style.top  = Math.min(wr.height - 20, Math.max(0, e.clientY - wr.top - zd.oy)) + 'px';
+    zoomFloat.style.right = 'auto';
+  });
+  window.addEventListener('mouseup', () => zd = null);
+})();
+
+function drawZoom() {
+  if (zoomFloat.style.display === 'none') return;
+  const cv = document.getElementById('zoomCanvas');
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (W < 10 || H < 10) return;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#a8d8ef'); g.addColorStop(1,'#e3f4fb');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  const slot = zoomActiveSlot();
+  if (slot < 0) {
+    ctx.fillStyle = '#5a7ea6'; ctx.font = '13px "Microsoft YaHei"';
+    ctx.fillText('尚未选择定日镜：请在右侧下拉框、场景或平面图中点选镜面', 14, H/2 - 6);
+    return;
+  }
+  const m = mirrors[state.sel[slot]];
+  const ss = sunState();
+  const pose = mirrorPose(m, ss);
+
+  // 特写相机：默认沿镜面法线正对反光面；用户拖动后改为手动环绕视角（state.zoomCam[slot]）
+  const n0 = pose ? pose.n : [0, 0.3, 0.9];          // 镜面法线（停用时取默认朝上）
+  let camAzi, camElv, camDist;
+  const zc = state.zoomCam[slot];
+  if (zc) {
+    camAzi = zc.azi; camElv = zc.elv; camDist = zc.dist;
+  } else {
+    camAzi = Math.atan2(n0[0], n0[1]) * 180/Math.PI;                        // 沿法线水平方向
+    camElv = Math.min(80, Math.max(12, Math.asin(Math.max(-1, Math.min(1, n0[2])))*180/Math.PI + 8));
+    camDist = 42;
+  }
+  const ca = camAzi*Math.PI/180, ce = camElv*Math.PI/180;
+  const C = [m.x + Math.sin(ca)*Math.cos(ce)*camDist,
+             m.y + Math.cos(ca)*Math.cos(ce)*camDist,
+             MIRROR_H + Math.sin(ce)*camDist];
+  const target = [m.x, m.y, MIRROR_H];
+  const d = norm([target[0]-C[0], target[1]-C[1], target[2]-C[2]]);
+  // 屏幕右向量与上向量：与主场景同一约定（u 的 z 分量恒为正，保证画面不上下颠倒）
+  const r = Math.hypot(d[0], d[1]) < 1e-6 ? [1,0,0] : norm([-d[1], d[0], 0]);
+  const u = cross(d, r);
+  const F = 200, K = Math.min(W,H)/11, cx = W*0.5, cy = H*0.52;
+  const P = p => {
+    const px = p[0]-C[0], py = p[1]-C[1], pz = p[2]-C[2];
+    const dep = Math.max(px*d[0]+py*d[1]+pz*d[2], 1);
+    const k = K*F/(F+dep);
+    return { x: cx + (px*r[0]+py*r[1]+pz*r[2])*k, y: cy - (px*u[0]+py*u[1]+pz*u[2])*k, dep, k };
+  };
+  camPos = C;   // 供 drawCyl3D 判断端面可见性
+  // 真实深度（不钳制）：用于近平面裁剪与"是否在相机前方"判断
+  const depOf = p => (p[0]-C[0])*d[0] + (p[1]-C[1])*d[1] + (p[2]-C[2])*d[2];
+
+  // 地面圆盘 + 镜场圈线（特写区域）
+  const RG = 55;
+  ctx.beginPath();
+  for (let i=0;i<=72;i++){ const a=i/72*2*Math.PI; const q=P([m.x+RG*Math.sin(a), m.y+RG*Math.cos(a), 0]); i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }
+  ctx.closePath();
+  ctx.fillStyle = '#c8e6f4'; ctx.fill();
+  ctx.strokeStyle = '#a6cbe0'; ctx.lineWidth = 1.5; ctx.stroke();
+  // 地面方位线（过镜面的南北/东西虚线）
+  ctx.setLineDash([6,5]); ctx.strokeStyle = 'rgba(90,130,165,.6)'; ctx.lineWidth = 1;
+  let qa = P([m.x-RG, m.y, 0]), qb = P([m.x+RG, m.y, 0]);
+  ctx.beginPath(); ctx.moveTo(qa.x,qa.y); ctx.lineTo(qb.x,qb.y); ctx.stroke();
+  qa = P([m.x, m.y-RG, 0]); qb = P([m.x, m.y+RG, 0]);
+  ctx.beginPath(); ctx.moveTo(qa.x,qa.y); ctx.lineTo(qb.x,qb.y); ctx.stroke();
+  ctx.setLineDash([]);
+  // 虚线尽头标注东南西北方位名称：端点在画布外时钳制到虚线与画布边缘的交点处
+  ctx.font = 'bold 13px "Microsoft YaHei"';
+  const qg = P([m.x, m.y, 0]);
+  [[m.x-RG, m.y, '西'], [m.x+RG, m.y, '东'], [m.x, m.y-RG, '南'], [m.x, m.y+RG, '北']].forEach(([wx, wy, t]) => {
+    const p3 = [wx, wy, 0];
+    if (depOf(p3) < 2 || depOf([m.x, m.y, 0]) < 2) return;
+    const q = P(p3);
+    let dx = q.x - qg.x, dy = q.y - qg.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 20) return;
+    dx /= L; dy /= L;
+    // 沿方向求画布边界内最大可见距离（留边距）
+    let tMax = Infinity;
+    if (dx > 1e-6) tMax = Math.min(tMax, (W - 20 - qg.x)/dx);
+    if (dx < -1e-6) tMax = Math.min(tMax, (20 - qg.x)/dx);
+    if (dy > 1e-6) tMax = Math.min(tMax, (H - 26 - qg.y)/dy);
+    if (dy < -1e-6) tMax = Math.min(tMax, (18 - qg.y)/dy);
+    if (tMax < 24) return;
+    const lx = qg.x + dx*tMax, ly = qg.y + dy*tMax;
+    ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(255,255,255,.95)';
+    ctx.strokeText(t, lx-6, ly+5);
+    ctx.fillStyle = '#175a8e'; ctx.fillText(t, lx-6, ly+5);
+  });
+
+  // 镜面影子
+  if (ss.elv > 3) {
+    const sz = ss.s[2];
+    let a1, b1;
+    if (pose) {
+      a1 = norm(cross(pose.n, [0,0,1]));
+      if (!isFinite(a1[0])) a1 = [1,0,0];
+      b1 = norm(cross(pose.n, a1));
+    } else { a1 = [1,0,0]; b1 = [0,1,0]; }
+    const cs = [[+MW/2,+ML/2],[-MW/2,+ML/2],[-MW/2,-ML/2],[+MW/2,-ML/2]].map(([uu, vv]) => {
+      const X = m.x + a1[0]*uu + b1[0]*vv;
+      const Y = m.y + a1[1]*uu + b1[1]*vv;
+      const Z = MIRROR_H + a1[2]*uu + b1[2]*vv;
+      return P([X - ss.s[0]*Z/sz, Y - ss.s[1]*Z/sz, 0]);
+    });
+    ctx.fillStyle = 'rgba(55,85,115,.16)';
+    ctx.beginPath();
+    cs.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
+    ctx.closePath(); ctx.fill();
+  }
+
+  // 深度排序绘制：镜面体 / 入射光线 / 反射光线 / 塔
+  const items = [];
+  const qM = P([m.x, m.y, MIRROR_H]);
+  // 支柱（向上逐渐变细的锥形柱：底部与底座圆点同直径，顶部直径小于镜面厚度0.4，侧视图不超出镜面）+ 底座
+  items.push({ dep: qM.dep + 0.5, draw: () => {
+    drawCyl3D(ctx, P, m.x, m.y, 0.32, 0.15, 0, MIRROR_H-0.2, '#7f8c99', '#5f6c79', null, null);
+    const qb = P([m.x, m.y, 0]);
+    ctx.fillStyle = '#4a5b6b'; ctx.beginPath(); ctx.arc(qb.x, qb.y, 3.2*qb.k/10, 0, 2*Math.PI); ctx.fill();
+  }});
+  // 镜面体（含厚度、背面剔除，正面用槽位色）
+  items.push({ dep: qM.dep, draw: () => {
+    const a1 = pose ? norm(cross(pose.n, [0,0,1])) : [1,0,0];
+    if (!isFinite(a1[0])) a1[0] = 1;
+    const b1 = pose ? norm(cross(pose.n, a1)) : [0,1,0];
+    const T = 0.4;
+    const csW = pose ? [
+      [m.x+a1[0]*MW/2+b1[0]*ML/2, m.y+a1[1]*MW/2+b1[1]*ML/2, MIRROR_H+a1[2]*MW/2+b1[2]*ML/2],
+      [m.x-a1[0]*MW/2+b1[0]*ML/2, m.y-a1[1]*MW/2+b1[1]*ML/2, MIRROR_H-a1[2]*MW/2+b1[2]*ML/2],
+      [m.x-a1[0]*MW/2-b1[0]*ML/2, m.y-a1[1]*MW/2-b1[1]*ML/2, MIRROR_H-a1[2]*MW/2-b1[2]*ML/2],
+      [m.x+a1[0]*MW/2-b1[0]*ML/2, m.y+a1[1]*MW/2-b1[1]*ML/2, MIRROR_H+a1[2]*MW/2-b1[2]*ML/2],
+    ] : [
+      [m.x+MW/2, m.y+ML/2, MIRROR_H], [m.x-MW/2, m.y+ML/2, MIRROR_H],
+      [m.x-MW/2, m.y-ML/2, MIRROR_H], [m.x+MW/2, m.y-ML/2, MIRROR_H],
+    ];
+    const cs = csW.map(P);
+    const back = csW.map(c => P([c[0], c[1], c[2]-T]));
+    ctx.fillStyle = '#3a4046'; ctx.strokeStyle = '#22272d'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    for (let j = 0; j < 4; j++) {
+      const k2 = (j+1)%4;
+      ctx.beginPath();
+      ctx.moveTo(cs[j].x, cs[j].y); ctx.lineTo(cs[k2].x, cs[k2].y);
+      ctx.lineTo(back[k2].x, back[k2].y); ctx.lineTo(back[j].x, back[j].y);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    if (pose) {
+      const vx = C[0]-m.x, vy = C[1]-m.y, vz = C[2]-MIRROR_H;
+      const seenFront = (vx*pose.n[0] + vy*pose.n[1] + vz*pose.n[2]) > 0;
+      if (seenFront) {
+        ctx.beginPath();
+        cs.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
+        ctx.closePath();
+        ctx.fillStyle = SEL_COLORS[slot]; ctx.fill();
+        ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cs[0].x, cs[0].y); ctx.lineTo(cs[1].x, cs[1].y); ctx.lineTo(cs[2].x, cs[2].y);
+        ctx.closePath(); ctx.fillStyle = 'rgba(190,225,255,.5)'; ctx.fill();
+      } else {
+        ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
+        ctx.closePath(); ctx.stroke();
+      }
+    } else {
+      ctx.beginPath();
+      cs.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
+      ctx.closePath();
+      ctx.fillStyle = '#9db1c2'; ctx.fill();
+      ctx.strokeStyle = '#5a7186'; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+  }});
+  // 入射平行光线（太阳方向 → 镜心）与反射光线（镜心 → 吸热器中心）
+  if (pose && ss.working) {
+    // 相机在法线正侧（反光面一侧）时，两条光线均在镜面与相机之间，画在镜面之前；
+    // 相机在背侧时，光线在镜面另一侧，画在镜面之后（被镜面正确遮挡）
+    const frontCam = (C[0]-m.x)*pose.n[0] + (C[1]-m.y)*pose.n[1] + (C[2]-MIRROR_H)*pose.n[2] > 0;
+    const rayDep = frontCam ? qM.dep - 1 : qM.dep + 1;
+    // 线段近平面裁剪：端点在相机背后时投影会镜像失真，须在世界空间裁到 dep>2 再投影
+    const NEAR = 2;
+    const clipSeg = (A, B) => {
+      const da = depOf(A), db = depOf(B);
+      if (da < NEAR && db < NEAR) return null;
+      let a = A, b = B;
+      if (da < NEAR) { const t = (NEAR-da)/(db-da); a = [A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t]; }
+      if (db < NEAR) { const t = (NEAR-db)/(da-db); b = [A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t]; }
+      return [P(a), P(b)];
+    };
+    const LEN = 90;
+    const iSeg = clipSeg([m.x + ss.s[0]*LEN, m.y + ss.s[1]*LEN, MIRROR_H + ss.s[2]*LEN], [m.x, m.y, MIRROR_H]);
+    if (iSeg) items.push({ dep: rayDep, draw: () => {
+      ctx.strokeStyle = 'rgba(255,215,80,.95)'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(iSeg[0].x, iSeg[0].y); ctx.lineTo(iSeg[1].x, iSeg[1].y); ctx.stroke();
+      ctx.lineCap = 'butt';
+    }});
+    const R = reflectDir([-ss.s[0], -ss.s[1], -ss.s[2]], pose.n);
+    const distT = Math.hypot(m.x, m.y, REC_CENTER - MIRROR_H);
+    const rSeg = clipSeg([m.x, m.y, MIRROR_H], [m.x + R[0]*distT, m.y + R[1]*distT, MIRROR_H + R[2]*distT]);
+    if (rSeg) items.push({ dep: rayDep, draw: () => {
+      // 反射光线：吸热器通常在特写画面外，光线延伸至画布边缘并以箭头+文字标注去向
+      const p0 = rSeg[0], p1 = rSeg[1];
+      const mx0 = 10;
+      const dxl = p1.x - p0.x, dyl = p1.y - p0.y;
+      let tEnd = 1;
+      if (dxl < -1e-6) tEnd = Math.min(tEnd, (mx0 - p0.x)/dxl);
+      if (dxl >  1e-6) tEnd = Math.min(tEnd, (W - mx0 - p0.x)/dxl);
+      if (dyl < -1e-6) tEnd = Math.min(tEnd, (mx0 - p0.y)/dyl);
+      if (dyl >  1e-6) tEnd = Math.min(tEnd, (H - mx0 - p0.y)/dyl);
+      tEnd = Math.max(0.02, tEnd);
+      const ex = p0.x + dxl*tEnd, ey = p0.y + dyl*tEnd;
+      ctx.strokeStyle = 'rgba(255,180,30,.95)'; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.lineCap = 'butt';
+      // 边缘箭头 + 去向文字（吸热器在画面内时直接标在端点旁）
+      const L = Math.hypot(dxl, dyl) || 1;
+      const ux = dxl/L, uy = dyl/L;
+      ctx.fillStyle = '#e59400';
+      ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(ex + ux*13, ey + uy*13);
+      ctx.lineTo(ex - ux*3 + uy*7, ey - uy*3 - ux*7);
+      ctx.lineTo(ex - ux*3 - uy*7, ey - uy*3 + ux*7);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.font = 'bold 12px "Microsoft YaHei"';
+      ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(255,255,255,.92)';
+      const tx = Math.min(W - 108, Math.max(6, ex - ux*20 - (ux > 0.3 ? 92 : 0)));
+      const ty = Math.min(H - 8, Math.max(14, ey - uy*16));
+      ctx.strokeText('反射光→吸热器', tx, ty);
+      ctx.fillText('反射光→吸热器', tx, ty);
+    }});
+  }
+  // 中央吸热塔（背景）：收分圆台 + 黄色吸热器
+  items.push({ dep: P([0, 0, TOWER_H*0.5]).dep, draw: () => {
+    const sh = ss.elv > 3 ? norm([ss.s[0], ss.s[1], 0]) : null;
+    drawCyl3D(ctx, P, 0, 0, 5.0, 1.9, 0, TOWER_H, '#e3ebf2', '#8fa2b2', null, sh);
+    drawCyl3D(ctx, P, 0, 0, 4.0, 4.0, TOWER_H-0.6, TOWER_H, '#aeb9c4', null, '#c9d2da', sh);
+    drawCyl3D(ctx, P, 0, 0, 5.2, 5.2, TOWER_H, TOWER_H + REC_H,
+      ss.working ? '#ffc23d' : '#a7b2bc',
+      ss.working ? '#e0a52e' : '#8b98a3',
+      ss.working ? '#ffe28a' : '#c2ccd4', sh);
+    if (ss.working) {
+      const rec = P([0,0,REC_CENTER]);
+      const glowR = 30*rec.k + 12;
+      const rg = ctx.createRadialGradient(rec.x, rec.y, 2, rec.x, rec.y, glowR);
+      rg.addColorStop(0,'rgba(255,235,140,.95)'); rg.addColorStop(0.4,'rgba(255,220,90,.45)'); rg.addColorStop(1,'rgba(255,220,90,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(rec.x, rec.y, glowR, 0, 2*Math.PI); ctx.fill();
+    }
+  }});
+  items.sort((a, b) => b.dep - a.dep);
+  items.forEach(o => o.draw());
+
+  // 太阳（沿入射方向远端投影，须在相机前方才绘制）
+  if (ss.elv > 0) {
+    const sp = [m.x + ss.s[0]*150, m.y + ss.s[1]*150, MIRROR_H + ss.s[2]*150];
+    if (depOf(sp) > 5) {
+      const qs = P(sp);
+      if (qs.x > -40 && qs.x < W+40 && qs.y > -40 && qs.y < H+40) drawSunIcon(ctx, qs.x, qs.y, 11);
+    }
+  }
+  // 吸热器标注（须在相机前方才绘制）
+  const rp = [0, 0, TOWER_H + REC_H];
+  if (depOf(rp) > 5) {
+    const recL = P(rp);
+    if (recL.x > -60 && recL.x < W+60 && recL.y > -40 && recL.y < H+40) {
+      ctx.font = 'bold 12px "Microsoft YaHei"';
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.strokeText('吸热器', recL.x + 10, recL.y - 6);
+      ctx.fillStyle = '#c07b00'; ctx.fillText('吸热器', recL.x + 10, recL.y - 6);
+    }
+  }
+  // 左上角信息
+  const p = poseAt(state.sel[slot], state.timeMin);
+  ctx.font = 'bold 13px "Microsoft YaHei"';
+  ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineJoin = 'round';
+  const info = `镜${slot+1} ${m.id}　${isNaN(p.tilt) ? '停用（水平放置）' : `仰角 ${p.tilt.toFixed(1)}°　方位角 ${p.face.toFixed(1)}°`}`;
+  ctx.strokeText(info, 10, 20);
+  ctx.fillStyle = SEL_COLORS[slot]; ctx.fillText(info, 10, 20);
+  // 操作提示（右下角）
+  ctx.font = '10px "Microsoft YaHei"';
+  ctx.textAlign = 'right';
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.85)';
+  const hintZ = state.zoomCam[slot]
+    ? `视角 方位${(((state.zoomCam[slot].azi%360)+360)%360).toFixed(0)}° 俯角${state.zoomCam[slot].elv.toFixed(0)}°　拖动旋转 · 滚轮缩放 · 双击复位`
+    : '拖动旋转视角 · 滚轮缩放 · 双击复位';
+  ctx.strokeText(hintZ, W - 8, H - 8);
+  ctx.fillStyle = '#527a99'; ctx.fillText(hintZ, W - 8, H - 8);
+  ctx.textAlign = 'left';
+}
 
 // 播放控制
 function setBtns() {
