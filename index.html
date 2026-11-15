@@ -178,6 +178,17 @@ const REC_CENTER = TOWER_H + REC_H*0.5;   // 吸热器中心（所有反射光�
 const MIRROR_H = 3.85;             // 镜面离地高度（放大 1.75 倍）
 const SUN_HS = 1.75;               // 太阳屏幕高度放大倍数
 const MW = 9, ML = 6.5;            // 镜面尺寸
+/* 定日镜支架几何（参照真实模型：喇叭底座 → 白立柱 → 灰头部箱 → 关节颈柱 + 圆球 → 镜板）
+   尺寸已整体缩细 1/8（×7/8）；头部箱深度方向与镜面法线对齐且 ≤ 镜面厚度 0.4，侧视图不超出镜面 */
+const PED = {
+  baseR0: 0.56, baseR1: 0.294, baseH: 0.45,  // 喇叭形底座：下宽上窄
+  postR: 0.21, postTop: 1.75,                // 立柱底部半径（立柱由下向上渐细）
+  boxZ0: 1.75, boxZ1: 2.9,                   // 立柱分段参考高度（与上下段连续）
+  neckR: 0.21, ballZ: 3.5, ballR: 0.14,      // 圆球半径（缩小1/2）；立柱顶部半径渐变到球半径
+  cols: 4, rows: 3,                          // 镜板网格分片
+};
+// 立柱半径：由下向上逐渐缩小，顶端等于圆球半径
+const colR = z => PED.postR + (PED.ballR - PED.postR)*(z - PED.baseH)/(PED.ballZ - PED.baseH);
 const norm = v => { const l = Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; };
 const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
 
@@ -345,8 +356,8 @@ const hexShade = (hex, f) => {
 };
 // 真实透视圆柱/圆台：上下端面圆环按真 3D 圆采样投影（椭圆形状随视角变化），
 // 侧面用条带逼近并按太阳方向着色；端面仅当相机位于其外侧时才绘制（不透视底部）
-function drawCyl3D(ctx, P, x, y, r0, r1, z0, z1, sideHex, capHex0, capHex1, sunH) {
-  const N = 44;
+function drawCyl3D(ctx, P, x, y, r0, r1, z0, z1, sideHex, capHex0, capHex1, sunH, N) {
+  N = N || 44;
   const rim = (r, z) => {
     const a = [];
     for (let i = 0; i < N; i++) {
@@ -360,7 +371,7 @@ function drawCyl3D(ctx, P, x, y, r0, r1, z0, z1, sideHex, capHex0, capHex1, sunH
   for (let i = 0; i < N; i++) {
     const j = (i+1) % N, t = i/N*2*Math.PI;
     let f = 0.85;
-    if (sunH) f = 0.6 + 0.4*Math.max(0, Math.sin(t)*sunH[0] + Math.cos(t)*sunH[1]);
+    if (sunH) f = 0.7 + 0.3*Math.max(0, Math.sin(t)*sunH[0] + Math.cos(t)*sunH[1]);
     ctx.beginPath();
     ctx.moveTo(B[i].x, B[i].y); ctx.lineTo(B[j].x, B[j].y);
     ctx.lineTo(T[j].x, T[j].y); ctx.lineTo(T[i].x, T[i].y);
@@ -379,6 +390,123 @@ function drawCyl3D(ctx, P, x, y, r0, r1, z0, z1, sideHex, capHex0, capHex1, sunH
   if (camZ > z1)      cap(T, capHex1, 'rgba(90,110,125,.75)');   // 相机在顶面之上 → 看到顶面
   else if (camZ < z0) cap(B, capHex0, 'rgba(90,110,125,.75)');   // 相机在底面之下 → 看到底面
   // 相机介于两端面之间时两个端面都不可见（侧面遮挡），不画端面
+}
+// 头部箱体（偏航对齐镜面朝向）：wHalf 沿镜面宽度方向、dHalf 沿镜面法线水平方向；
+// 按世界法线剔除背面，仅绘制朝向相机的面；侧面按太阳水平方向着色
+function drawBox3D(ctx, P, cx, cy, z0, z1, wHalf, dHalf, yawD2R, colTop, colSide, sunH) {
+  const wx = Math.cos(yawD2R), wy = -Math.sin(yawD2R);   // 宽度方向（镜面平面内水平）
+  const dx2 = Math.sin(yawD2R), dy2 = Math.cos(yawD2R);  // 深度方向（镜面法线水平）
+  const wpt = (sw, sd, z) => [cx + wx*sw*wHalf + dx2*sd*dHalf, cy + wy*sw*wHalf + dy2*sd*dHalf, z];
+  const cpt = (sw, sd, z) => P(wpt(sw, sd, z));
+  const b = [[-1,-1],[1,-1],[1,1],[-1,1]].map(([s1,s2]) => cpt(s1,s2,z0));
+  const t = [[-1,-1],[1,-1],[1,1],[-1,1]].map(([s1,s2]) => cpt(s1,s2,z1));
+  const face = (pts, hex) => {
+    ctx.beginPath();
+    pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.closePath(); ctx.fillStyle = hex; ctx.fill();
+    ctx.strokeStyle = 'rgba(55,65,78,.55)'; ctx.lineWidth = 1; ctx.stroke();
+  };
+  if (camPos[2] < z0) face(b, hexShade(colSide, 0.72));            // 底面（仅相机低于箱底时可见）
+  if (camPos[2] > z1) face(t, hexShade(colTop, 1.06));             // 顶面
+  // 四个侧面：世界法线朝向相机才绘制，按朝向与太阳水平方向的夹角着色
+  const sides = [
+    { n: [wx,wy,0],      c: [[1,-1],[1,1]] },
+    { n: [-wx,-wy,0],    c: [[-1,-1],[-1,1]] },
+    { n: [dx2,dy2,0],    c: [[-1,1],[1,1]] },
+    { n: [-dx2,-dy2,0],  c: [[-1,-1],[1,-1]] },
+  ];
+  sides.forEach(({ n, c }) => {
+    const fa = wpt(c[0][0], c[0][1], (z0+z1)/2), fb = wpt(c[1][0], c[1][1], (z0+z1)/2);
+    const fc = [(fa[0]+fb[0])/2, (fa[1]+fb[1])/2];
+    const vis = (camPos[0]-fc[0])*n[0] + (camPos[1]-fc[1])*n[1] + (camPos[2]-(z0+z1)/2)*n[2] > 0;
+    if (!vis) return;
+    let f = 0.82;
+    if (sunH) f = 0.74 + 0.26*Math.max(0, n[0]*sunH[0] + n[1]*sunH[1]);
+    face([cpt(c[0][0],c[0][1],z0), cpt(c[1][0],c[1][1],z0), cpt(c[1][0],c[1][1],z1), cpt(c[0][0],c[0][1],z1)], hexShade(colSide, f));
+  });
+}
+// 镜板网格分片线（cols×rows 分片，参照真实定日镜的小镜片拼接）
+// csW: 4 个世界角点 [0]=+a+b [1]=-a+b [2]=-a-b [3]=+a-b；zShift: 厚度向下偏移（背面网格）
+function drawMirrorGrid(ctx, P, csW, cols, rows, color, lw, zShift) {
+  const lerp = (A, B, t) => [A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t];
+  const dz = zShift || 0;
+  const Pr = p => P([p[0], p[1], p[2]-dz]);
+  ctx.strokeStyle = color; ctx.lineWidth = lw;
+  for (let k = 1; k < cols; k++) {
+    const t = k/cols;
+    const p1 = Pr(lerp(csW[0], csW[1], t)), p2 = Pr(lerp(csW[3], csW[2], t));
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+  }
+  for (let k = 1; k < rows; k++) {
+    const t = k/rows;
+    const p1 = Pr(lerp(csW[0], csW[3], t)), p2 = Pr(lerp(csW[1], csW[2], t));
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+  }
+}
+// 定日镜支架段绘制：z0<baseH 时画喇叭底座；立柱为上细下粗的锥形柱（顶部半径渐变到球半径）
+function drawPedestalSeg(ctx, P, m, sH, N, z0, z1) {
+  if (z0 < PED.baseH)
+    drawCyl3D(ctx, P, m.x, m.y, PED.baseR0, PED.baseR1, 0, PED.baseH, '#82888f', '#5d646c', null, sH, N);
+  const a = Math.max(z0, PED.baseH);
+  if (z1 > a)
+    drawCyl3D(ctx, P, m.x, m.y, colR(a), colR(z1), a, z1, '#e9ebee', '#c6cad1', '#f2f4f6', sH, Math.max(8, N-4));
+}
+// 相机到点 p 的线段是否被该镜的镜面板遮挡（射线与镜面 quad 精确求交）
+// 解决低角度背视时支架因单一排序深度被镜面整体误遮挡的问题
+// 二维线段与矩形求交（用于镜板厚度区间检测）
+function segRectHit(ax, ay, bx, by, hx, hy) {
+  if (Math.abs(ax) <= hx && Math.abs(ay) <= hy) return true;
+  if (Math.abs(bx) <= hx && Math.abs(by) <= hy) return true;
+  const edges = [[-hx,-hy,hx,-hy],[hx,-hy,hx,hy],[hx,hy,-hx,hy],[-hx,hy,-hx,-hy]];
+  const dx = bx-ax, dy = by-ay;
+  for (const [x1,y1,x2,y2] of edges) {
+    const ex = x2-x1, ey = y2-y1;
+    const den = dx*ey - dy*ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const t = ((x1-ax)*ey - (y1-ay)*ex) / den;
+    const s = ((x1-ax)*dy - (y1-ay)*dx) / den;
+    if (t > 0 && t < 1 && s >= 0 && s <= 1) return true;
+  }
+  return false;
+}
+// 相机到点 p 的线段是否被该镜的镜面板（含 0.4 厚度）遮挡
+// 对镜板前、后两个面分别求交，得视线在板厚区间内的轨迹段，再与镜面轮廓矩形求交
+function segHitsMirrorQuad(m, pose, cam, p) {
+  const M = [m.x, m.y, MIRROR_H];
+  let n, a1, b1, dBack;
+  if (pose) {
+    n = pose.n;
+    const a1v = cross(n, [0,0,1]);
+    a1 = Math.hypot(a1v[0],a1v[1],a1v[2]) < 1e-6 ? [1,0,0] : norm(a1v);
+    b1 = norm(cross(n, a1));
+    dBack = -0.4 * n[2];                     // 背面沿 -z 偏移板厚在法线方向的投影
+  } else {
+    n = [0,0,1]; a1 = [1,0,0]; b1 = [0,1,0]; // 停用时镜面水平放置，同样参与遮挡
+    dBack = -0.4;
+  }
+  const dn = (p[0]-cam[0])*n[0] + (p[1]-cam[1])*n[1] + (p[2]-cam[2])*n[2];
+  if (Math.abs(dn) < 1e-9) return false;
+  const dMid = (M[0]-cam[0])*n[0] + (M[1]-cam[1])*n[1] + (M[2]-cam[2])*n[2];
+  let tA = dMid/dn, tB = (dMid + dBack)/dn;  // 前、后面的交点参数
+  if (tA > tB) { const t0 = tA; tA = tB; tB = t0; }
+  tA = Math.max(tA, 0.02); tB = Math.min(tB, 0.995);   // 须位于相机与目标点之间
+  if (tB <= tA) return false;
+  const toUV = t => {
+    const ix = cam[0]+(p[0]-cam[0])*t - M[0], iy = cam[1]+(p[1]-cam[1])*t - M[1], iz = cam[2]+(p[2]-cam[2])*t - M[2];
+    return [ix*a1[0]+iy*a1[1]+iz*a1[2], ix*b1[0]+iy*b1[1]+iz*b1[2]];
+  };
+  const A = toUV(tA), B = toUV(tB);
+  return segRectHit(A[0], A[1], B[0], B[1], MW/2 + 0.2, ML/2 + 0.2);
+}
+// 关节部分：颈柱（锥形连续）+ 万向节圆球（位于镜面法线负侧，按相机在镜面正/背侧动态参与深度排序）
+function drawPedestalJoint(ctx, P, m, sH, N) {
+  drawCyl3D(ctx, P, m.x, m.y, colR(PED.boxZ1), PED.ballR, PED.boxZ1, PED.ballZ, '#e9ebee', '#c6cad1', '#f2f4f6', sH, Math.max(8, N-6));
+  const qb = P([m.x, m.y, PED.ballZ]);
+  const rb = Math.max(1.2, PED.ballR*qb.k);
+  const gr = ctx.createRadialGradient(qb.x-rb*0.35, qb.y-rb*0.35, rb*0.15, qb.x, qb.y, rb);
+  gr.addColorStop(0, '#f0f3f6'); gr.addColorStop(1, '#848c96');
+  ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(qb.x, qb.y, rb, 0, 2*Math.PI); ctx.fill();
+  ctx.strokeStyle = 'rgba(70,80,92,.6)'; ctx.lineWidth = 1; ctx.stroke();
 }
 function label(ctx, txt, x, y, lx, ly) {
   ctx.strokeStyle = '#37628c'; ctx.lineWidth = 1.2;
@@ -466,11 +594,8 @@ function drawScene() {
 
   // ---- 绘制单面定日镜 / 单条光线（前后分层调用，保证塔不透明遮挡） ----
   const drawOneMirror = (m, i) => {
-    const q = P([m.x, m.y, MIRROR_H]), qb = P([m.x, m.y, 0]);
+    const q = P([m.x, m.y, MIRROR_H]);
     const pose = mirrorPose(m, ss);
-    ctx.strokeStyle = '#5a7186'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(qb.x, qb.y); ctx.lineTo(q.x, q.y); ctx.stroke();
-    ctx.fillStyle = '#3d566e'; ctx.beginPath(); ctx.arc(qb.x, qb.y, 2.5, 0, 2*Math.PI); ctx.fill();
 
     if (pose) {
       let a1 = norm(cross(pose.n, [0,0,1]));
@@ -490,11 +615,12 @@ function drawScene() {
       // 相机在镜面正面一侧才画反光面，否则只看到灰黑色背面（体现真实朝向）
       const vx = camPos[0]-m.x, vy = camPos[1]-m.y, vz = camPos[2]-MIRROR_H;
       const seenFront = (vx*pose.n[0] + vy*pose.n[1] + vz*pose.n[2]) > 0;
-      // 背面与四个侧面（灰黑色），体现镜面厚度
-      ctx.fillStyle = '#3a4046'; ctx.strokeStyle = '#22272d'; ctx.lineWidth = 0.8;
+      // 背面与四个侧面（银灰白框架质感），体现镜面厚度
+      ctx.fillStyle = '#c2c8cf'; ctx.strokeStyle = '#7d858f'; ctx.lineWidth = 0.8;
       ctx.beginPath();
       back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
       ctx.closePath(); ctx.fill(); ctx.stroke();
+      drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(110,120,132,.6)', 0.7, T);
       for (let j = 0; j < 4; j++) {
         const k2 = (j+1)%4;
         ctx.beginPath();
@@ -503,12 +629,13 @@ function drawScene() {
         ctx.closePath(); ctx.fill(); ctx.stroke();
       }
       if (seenFront) {
-        // 正面（颜色不变：普通镜蓝面 / 选中镜槽位色）
+        // 正面（普通镜蓝面 / 选中镜槽位色）+ 网格分片线
         ctx.beginPath();
         cs.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
         ctx.closePath();
-        ctx.fillStyle = slot >= 0 ? SEL_COLORS[slot] : '#2f66b0'; ctx.fill();
-        ctx.strokeStyle = slot >= 0 ? '#ffd400' : '#1c4a86'; ctx.lineWidth = slot >= 0 ? 3 : 1.1; ctx.stroke();
+        ctx.fillStyle = slot >= 0 ? SEL_COLORS[slot] : '#4353c5'; ctx.fill();
+        ctx.strokeStyle = slot >= 0 ? '#ffd400' : '#2a3670'; ctx.lineWidth = slot >= 0 ? 3 : 1.1; ctx.stroke();
+        drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(255,255,255,.5)', 0.8, 0);
         ctx.beginPath();
         ctx.moveTo(cs[0].x, cs[0].y); ctx.lineTo(cs[1].x, cs[1].y); ctx.lineTo(cs[2].x, cs[2].y);
         ctx.closePath(); ctx.fillStyle = 'rgba(190,225,255,.5)'; ctx.fill();
@@ -531,7 +658,7 @@ function drawScene() {
       ];
       const cs = csW.map(P);
       const back = csW.map(c => P([c[0], c[1], c[2]-T]));
-      ctx.fillStyle = '#3a4046'; ctx.strokeStyle = '#22272d'; ctx.lineWidth = 0.8;
+      ctx.fillStyle = '#c2c8cf'; ctx.strokeStyle = '#7d858f'; ctx.lineWidth = 0.8;
       for (let j = 0; j < 4; j++) {
         const k2 = (j+1)%4;
         ctx.beginPath();
@@ -544,6 +671,7 @@ function drawScene() {
       ctx.closePath();
       ctx.fillStyle = '#9db1c2'; ctx.fill();
       ctx.strokeStyle = '#5a7186'; ctx.lineWidth = 1.1; ctx.stroke();
+      drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(255,255,255,.4)', 0.7, 0);
     }
   };
   // 选中镜的地面转动方向箭头构造器：返回绘制闭包（null=当前无需绘制）
@@ -621,9 +749,18 @@ function drawScene() {
   const rec2 = P([0,0,REC_CENTER]);            // 吸热器中心 = 所有反射光线的汇聚点
   const sun = sunScreen(ss, W, H);
   const items = [];
-  // 每面定日镜（含厚度盒体）
+  // 每面定日镜：下部支架 / 镜面体 / 关节 三个独立深度项（真实遮挡关系）
   mirrors.forEach((m, i) => {
     const q = P([m.x, m.y, MIRROR_H]);
+    const pose = mirrorPose(m, ss);
+    const sH = [ss.s[0], ss.s[1]];
+    // 下部支架分两段：被本镜镜板遮挡时画在镜面后，否则按自身真实深度参与排序
+    const occl = pz => segHitsMirrorQuad(m, pose, camPos, [m.x, m.y, pz]) ? q.dep + 1 : P([m.x, m.y, pz]).dep;
+    items.push({ dep: occl(0.2), draw: () => drawPedestalSeg(ctx, P, m, sH, 12, 0, 1.9) });
+    items.push({ dep: occl(2.3), draw: () => drawPedestalSeg(ctx, P, m, sH, 12, 1.9, PED.boxZ1) });
+    // 关节（颈柱+球）位于镜面法线负侧：相机在正面时被镜面遮挡，在背面时画在镜面前
+    const frontCamM = pose ? ((camPos[0]-m.x)*pose.n[0] + (camPos[1]-m.y)*pose.n[1] + (camPos[2]-MIRROR_H)*pose.n[2]) > 0 : true;
+    items.push({ dep: frontCamM ? q.dep + 1 : q.dep - 1, draw: () => drawPedestalJoint(ctx, P, m, sH, 12) });
     items.push({ dep: q.dep, draw: () => { drawOneMirror(m, i); hitList.push({ x: q.x, y: q.y, i }); } });
   });
   // 每面工作镜的两段光线（太阳→镜、镜→吸热器）作为独立深度项参与排序
@@ -1295,13 +1432,13 @@ function drawZoom() {
   // 深度排序绘制：镜面体 / 入射光线 / 反射光线 / 塔
   const items = [];
   const qM = P([m.x, m.y, MIRROR_H]);
-  // 支柱（向上逐渐变细的锥形柱：底部与底座圆点同直径，顶部直径小于镜面厚度0.4，侧视图不超出镜面）+ 底座
-  items.push({ dep: qM.dep + 0.5, draw: () => {
-    drawCyl3D(ctx, P, m.x, m.y, 0.32, 0.15, 0, MIRROR_H-0.2, '#7f8c99', '#5f6c79', null, null);
-    const qb = P([m.x, m.y, 0]);
-    ctx.fillStyle = '#4a5b6b'; ctx.beginPath(); ctx.arc(qb.x, qb.y, 3.2*qb.k/10, 0, 2*Math.PI); ctx.fill();
-  }});
-  // 镜面体（含厚度、背面剔除，正面用槽位色）
+  // 支架分两段：被本镜镜板遮挡时画在镜面后，否则按自身真实深度参与排序；关节（颈柱+球）按相机在镜面正/背侧动态排序
+  const frontCamZ = pose ? ((C[0]-m.x)*pose.n[0] + (C[1]-m.y)*pose.n[1] + (C[2]-MIRROR_H)*pose.n[2]) > 0 : true;
+  const occlZ = pz => segHitsMirrorQuad(m, pose, C, [m.x, m.y, pz]) ? qM.dep + 1 : P([m.x, m.y, pz]).dep;
+  items.push({ dep: occlZ(0.2), draw: () => drawPedestalSeg(ctx, P, m, [ss.s[0], ss.s[1]], 28, 0, 1.9) });
+  items.push({ dep: occlZ(2.3), draw: () => drawPedestalSeg(ctx, P, m, [ss.s[0], ss.s[1]], 28, 1.9, PED.boxZ1) });
+  items.push({ dep: frontCamZ ? qM.dep + 1 : qM.dep - 1, draw: () => drawPedestalJoint(ctx, P, m, [ss.s[0], ss.s[1]], 28) });
+  // 镜面体（含厚度、背面剔除，正面用槽位色；网格分片参照真实定日镜小镜片拼接）
   items.push({ dep: qM.dep, draw: () => {
     const a1 = pose ? norm(cross(pose.n, [0,0,1])) : [1,0,0];
     if (!isFinite(a1[0])) a1[0] = 1;
@@ -1318,10 +1455,12 @@ function drawZoom() {
     ];
     const cs = csW.map(P);
     const back = csW.map(c => P([c[0], c[1], c[2]-T]));
-    ctx.fillStyle = '#3a4046'; ctx.strokeStyle = '#22272d'; ctx.lineWidth = 1;
+    // 背面与四个侧面（银灰白框架质感）+ 背面网格分片线
+    ctx.fillStyle = '#c2c8cf'; ctx.strokeStyle = '#7d858f'; ctx.lineWidth = 1;
     ctx.beginPath();
     back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
     ctx.closePath(); ctx.fill(); ctx.stroke();
+    drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(110,120,132,.6)', 1.3, T);
     for (let j = 0; j < 4; j++) {
       const k2 = (j+1)%4;
       ctx.beginPath();
@@ -1338,14 +1477,26 @@ function drawZoom() {
         ctx.closePath();
         ctx.fillStyle = SEL_COLORS[slot]; ctx.fill();
         ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 3; ctx.stroke();
+        drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(255,255,255,.5)', 1.6, 0);
         ctx.beginPath();
         ctx.moveTo(cs[0].x, cs[0].y); ctx.lineTo(cs[1].x, cs[1].y); ctx.lineTo(cs[2].x, cs[2].y);
         ctx.closePath(); ctx.fillStyle = 'rgba(190,225,255,.5)'; ctx.fill();
       } else {
+        // 从背面看：银灰框架背面 + 槽位色描边标识选中 + 镜背中心的关节安装环
         ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 2.6;
         ctx.beginPath();
         back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
         ctx.closePath(); ctx.stroke();
+        ctx.beginPath();
+        for (let k = 0; k <= 24; k++) {
+          const a = k/24*2*Math.PI;
+          const p3 = P([m.x + a1[0]*PED.ballR*Math.sin(a) + b1[0]*PED.ballR*Math.cos(a),
+                        m.y + a1[1]*PED.ballR*Math.sin(a) + b1[1]*PED.ballR*Math.cos(a),
+                        MIRROR_H - T/2 + a1[2]*PED.ballR*Math.sin(a) + b1[2]*PED.ballR*Math.cos(a)]);
+          k ? ctx.lineTo(p3.x, p3.y) : ctx.moveTo(p3.x, p3.y);
+        }
+        ctx.fillStyle = 'rgba(190,198,206,.9)'; ctx.fill();
+        ctx.strokeStyle = '#5a636e'; ctx.lineWidth = 1.6; ctx.stroke();
       }
     } else {
       ctx.beginPath();
@@ -1353,6 +1504,7 @@ function drawZoom() {
       ctx.closePath();
       ctx.fillStyle = '#9db1c2'; ctx.fill();
       ctx.strokeStyle = '#5a7186'; ctx.lineWidth = 1.2; ctx.stroke();
+      drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(255,255,255,.4)', 1.2, 0);
     }
   }});
   // 入射平行光线（太阳方向 → 镜心）与反射光线（镜心 → 吸热器中心）
