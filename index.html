@@ -185,6 +185,7 @@ const PED = {
   postR: 0.21, postTop: 1.75,                // 立柱底部半径（立柱由下向上渐细）
   boxZ0: 1.75, boxZ1: 2.9,                   // 立柱分段参考高度（与上下段连续）
   neckR: 0.21, ballZ: 3.5, ballR: 0.14,      // 圆球半径（缩小1/2）；立柱顶部半径渐变到球半径
+  sliceH: 0.25,                              // 支架遮挡判定的 z 切片高度
   cols: 4, rows: 3,                          // 镜板网格分片
 };
 // 立柱半径：由下向上逐渐缩小，顶端等于圆球半径
@@ -445,11 +446,17 @@ function drawMirrorGrid(ctx, P, csW, cols, rows, color, lw, zShift) {
 }
 // 定日镜支架段绘制：z0<baseH 时画喇叭底座；立柱为上细下粗的锥形柱（顶部半径渐变到球半径）
 function drawPedestalSeg(ctx, P, m, sH, N, z0, z1) {
-  if (z0 < PED.baseH)
-    drawCyl3D(ctx, P, m.x, m.y, PED.baseR0, PED.baseR1, 0, PED.baseH, '#82888f', '#5d646c', null, sH, N);
+  // 底座锥形段（按切片区间裁剪，半径随高度线性插值；仅地面端与锥-柱过渡处绘制端盖）
+  if (z0 < PED.baseH) {
+    const ze = Math.min(z1, PED.baseH);
+    const r = t => PED.baseR0 + (PED.baseR1 - PED.baseR0) * (t / PED.baseH);
+    const cap0 = z0 < 0.01 ? '#5d646c' : null;
+    const cap1 = z1 >= PED.baseH ? '#6a727b' : null;
+    drawCyl3D(ctx, P, m.x, m.y, r(z0), r(ze), z0, ze, '#82888f', cap0, cap1, sH, N);
+  }
   const a = Math.max(z0, PED.baseH);
   if (z1 > a)
-    drawCyl3D(ctx, P, m.x, m.y, colR(a), colR(z1), a, z1, '#e9ebee', '#c6cad1', '#f2f4f6', sH, Math.max(8, N-4));
+    drawCyl3D(ctx, P, m.x, m.y, colR(a), colR(z1), a, z1, '#e9ebee', null, null, sH, Math.max(8, N-4));
 }
 // 相机到点 p 的线段是否被该镜的镜面板遮挡（射线与镜面 quad 精确求交）
 // 解决低角度背视时支架因单一排序深度被镜面整体误遮挡的问题
@@ -498,9 +505,16 @@ function segHitsMirrorQuad(m, pose, cam, p) {
   const A = toUV(tA), B = toUV(tB);
   return segRectHit(A[0], A[1], B[0], B[1], MW/2 + 0.2, ML/2 + 0.2);
 }
-// 关节部分：颈柱（锥形连续）+ 万向节圆球（位于镜面法线负侧，按相机在镜面正/背侧动态参与深度排序）
-function drawPedestalJoint(ctx, P, m, sH, N) {
-  drawCyl3D(ctx, P, m.x, m.y, colR(PED.boxZ1), PED.ballR, PED.boxZ1, PED.ballZ, '#e9ebee', '#c6cad1', '#f2f4f6', sH, Math.max(8, N-6));
+// 关节部分：颈柱切片（锥形连续）与万向节圆球分开绘制，各自参与深度排序
+function drawNeckSlice(ctx, P, m, sH, N, z0, z1) {
+  drawCyl3D(ctx, P, m.x, m.y, colR(z0), colR(z1), z0, z1, '#e9ebee', null, null, sH, Math.max(8, N-6));
+}
+// 绘制支架区间 [z0,z1]（自动跨越底座锥段/立柱/颈柱边界）
+function drawPedestalSpan(ctx, P, m, sH, N, z0, z1) {
+  if (z0 < PED.boxZ1) drawPedestalSeg(ctx, P, m, sH, N, z0, Math.min(z1, PED.boxZ1));
+  if (z1 > PED.boxZ1) drawNeckSlice(ctx, P, m, sH, N, Math.max(z0, PED.boxZ1), z1);
+}
+function drawBall(ctx, P, m) {
   const qb = P([m.x, m.y, PED.ballZ]);
   const rb = Math.max(1.2, PED.ballR*qb.k);
   const gr = ctx.createRadialGradient(qb.x-rb*0.35, qb.y-rb*0.35, rb*0.15, qb.x, qb.y, rb);
@@ -629,19 +643,19 @@ function drawScene() {
         ctx.closePath(); ctx.fill(); ctx.stroke();
       }
       if (seenFront) {
-        // 正面（普通镜蓝面 / 选中镜槽位色）+ 网格分片线
+        // 正面（镜面配色不变：蓝面）+ 选中时仅外围边框用槽位色
         ctx.beginPath();
         cs.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
         ctx.closePath();
-        ctx.fillStyle = slot >= 0 ? SEL_COLORS[slot] : '#4353c5'; ctx.fill();
-        ctx.strokeStyle = slot >= 0 ? '#ffd400' : '#2a3670'; ctx.lineWidth = slot >= 0 ? 3 : 1.1; ctx.stroke();
+        ctx.fillStyle = '#4353c5'; ctx.fill();
+        ctx.strokeStyle = slot >= 0 ? SEL_COLORS[slot] : '#2a3670'; ctx.lineWidth = slot >= 0 ? 4 : 1.1; ctx.stroke();
         drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(255,255,255,.5)', 0.8, 0);
         ctx.beginPath();
         ctx.moveTo(cs[0].x, cs[0].y); ctx.lineTo(cs[1].x, cs[1].y); ctx.lineTo(cs[2].x, cs[2].y);
         ctx.closePath(); ctx.fillStyle = 'rgba(190,225,255,.5)'; ctx.fill();
       } else if (slot >= 0) {
         // 从背面看：保持灰黑背面质感，仅用槽位色描边标识选中
-        ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 2.4;
+        ctx.strokeStyle = SEL_COLORS[slot]; ctx.lineWidth = 2.4;
         ctx.beginPath();
         back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
         ctx.closePath(); ctx.stroke();
@@ -754,13 +768,19 @@ function drawScene() {
     const q = P([m.x, m.y, MIRROR_H]);
     const pose = mirrorPose(m, ss);
     const sH = [ss.s[0], ss.s[1]];
-    // 下部支架分两段：被本镜镜板遮挡时画在镜面后，否则按自身真实深度参与排序
-    const occl = pz => segHitsMirrorQuad(m, pose, camPos, [m.x, m.y, pz]) ? q.dep + 1 : P([m.x, m.y, pz]).dep;
-    items.push({ dep: occl(0.2), draw: () => drawPedestalSeg(ctx, P, m, sH, 12, 0, 1.9) });
-    items.push({ dep: occl(2.3), draw: () => drawPedestalSeg(ctx, P, m, sH, 12, 1.9, PED.boxZ1) });
-    // 关节（颈柱+球）位于镜面法线负侧：相机在正面时被镜面遮挡，在背面时画在镜面前
+    // 支架按细切片判定与镜板的遮挡关系，再按连续同状态合并成组绘制：
+    // 视线穿过板体(含厚度)的切片 → 画在镜面后；其余切片必在镜板前方（凸板体保证）→ 画在镜面前。
+    // 合并后每面镜支架最多 2 个绘制项，既避免逐切片描边形成条纹，又保证像素级正确的遮挡
+    let cur = null;
+    for (let zs = 0; zs < PED.ballZ; zs += PED.sliceH) {
+      const z1s = Math.min(zs + PED.sliceH, PED.ballZ);
+      const hidden = segHitsMirrorQuad(m, pose, camPos, [m.x, m.y, (zs + z1s) / 2]);
+      if (cur && cur.hidden === hidden) { cur.z1 = z1s; }
+      else { const r = { hidden, z0: zs, z1: z1s }; cur = r; items.push({ dep: hidden ? q.dep + 1 : q.dep - 1, draw: () => drawPedestalSpan(ctx, P, m, sH, 10, r.z0, r.z1) }); }
+    }
+    // 圆球嵌在镜背中心（背面视角可见）：相机在镜背侧时画在镜面前，正面时被镜面遮挡
     const frontCamM = pose ? ((camPos[0]-m.x)*pose.n[0] + (camPos[1]-m.y)*pose.n[1] + (camPos[2]-MIRROR_H)*pose.n[2]) > 0 : true;
-    items.push({ dep: frontCamM ? q.dep + 1 : q.dep - 1, draw: () => drawPedestalJoint(ctx, P, m, sH, 12) });
+    items.push({ dep: frontCamM ? q.dep + 1 : q.dep - 1, draw: () => drawBall(ctx, P, m) });
     items.push({ dep: q.dep, draw: () => { drawOneMirror(m, i); hitList.push({ x: q.x, y: q.y, i }); } });
   });
   // 每面工作镜的两段光线（太阳→镜、镜→吸热器）作为独立深度项参与排序
@@ -1432,12 +1452,17 @@ function drawZoom() {
   // 深度排序绘制：镜面体 / 入射光线 / 反射光线 / 塔
   const items = [];
   const qM = P([m.x, m.y, MIRROR_H]);
-  // 支架分两段：被本镜镜板遮挡时画在镜面后，否则按自身真实深度参与排序；关节（颈柱+球）按相机在镜面正/背侧动态排序
+  // 支架按细切片判定与镜板的遮挡关系并合并同状态区间（同主场景逻辑）
+  let cur = null;
+  for (let zs = 0; zs < PED.ballZ; zs += PED.sliceH) {
+    const z1s = Math.min(zs + PED.sliceH, PED.ballZ);
+    const hidden = segHitsMirrorQuad(m, pose, C, [m.x, m.y, (zs + z1s) / 2]);
+    if (cur && cur.hidden === hidden) { cur.z1 = z1s; }
+    else { const r = { hidden, z0: zs, z1: z1s }; cur = r; items.push({ dep: hidden ? qM.dep + 1 : qM.dep - 1, draw: () => drawPedestalSpan(ctx, P, m, [ss.s[0], ss.s[1]], 24, r.z0, r.z1) }); }
+  }
+  // 圆球嵌在镜背中心（背面视角可见）：相机在镜背侧时画在镜面前，正面时被镜面遮挡
   const frontCamZ = pose ? ((C[0]-m.x)*pose.n[0] + (C[1]-m.y)*pose.n[1] + (C[2]-MIRROR_H)*pose.n[2]) > 0 : true;
-  const occlZ = pz => segHitsMirrorQuad(m, pose, C, [m.x, m.y, pz]) ? qM.dep + 1 : P([m.x, m.y, pz]).dep;
-  items.push({ dep: occlZ(0.2), draw: () => drawPedestalSeg(ctx, P, m, [ss.s[0], ss.s[1]], 28, 0, 1.9) });
-  items.push({ dep: occlZ(2.3), draw: () => drawPedestalSeg(ctx, P, m, [ss.s[0], ss.s[1]], 28, 1.9, PED.boxZ1) });
-  items.push({ dep: frontCamZ ? qM.dep + 1 : qM.dep - 1, draw: () => drawPedestalJoint(ctx, P, m, [ss.s[0], ss.s[1]], 28) });
+  items.push({ dep: frontCamZ ? qM.dep + 1 : qM.dep - 1, draw: () => drawBall(ctx, P, m) });
   // 镜面体（含厚度、背面剔除，正面用槽位色；网格分片参照真实定日镜小镜片拼接）
   items.push({ dep: qM.dep, draw: () => {
     const a1 = pose ? norm(cross(pose.n, [0,0,1])) : [1,0,0];
@@ -1475,15 +1500,15 @@ function drawZoom() {
         ctx.beginPath();
         cs.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
         ctx.closePath();
-        ctx.fillStyle = SEL_COLORS[slot]; ctx.fill();
-        ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = '#4353c5'; ctx.fill();
+        ctx.strokeStyle = SEL_COLORS[slot]; ctx.lineWidth = 5; ctx.stroke();
         drawMirrorGrid(ctx, P, csW, PED.cols, PED.rows, 'rgba(255,255,255,.5)', 1.6, 0);
         ctx.beginPath();
         ctx.moveTo(cs[0].x, cs[0].y); ctx.lineTo(cs[1].x, cs[1].y); ctx.lineTo(cs[2].x, cs[2].y);
         ctx.closePath(); ctx.fillStyle = 'rgba(190,225,255,.5)'; ctx.fill();
       } else {
         // 从背面看：银灰框架背面 + 槽位色描边标识选中 + 镜背中心的关节安装环
-        ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 2.6;
+        ctx.strokeStyle = SEL_COLORS[slot]; ctx.lineWidth = 2.6;
         ctx.beginPath();
         back.forEach((c,j) => j ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y));
         ctx.closePath(); ctx.stroke();
