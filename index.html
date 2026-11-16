@@ -379,7 +379,8 @@ function drawCyl3D(ctx, P, x, y, r0, r1, z0, z1, sideHex, capHex0, capHex1, sunH
     ctx.closePath();
     ctx.fillStyle = hexShade(sideHex, f); ctx.fill();
   }
-  // 端面：圆盘多边形（其投影形状随视角真实变化），只画相机可见的那个端面
+  // 端面：圆盘多边形（其投影形状随视角真实变化），只画相机可见且指定了颜色的端面
+  // capHex 为 null 表示该端面不对外可见（连续柱面），跳过绘制，避免残留圆环
   const camZ = camPos[2];
   const cap = (pts, hex, edge) => {
     ctx.beginPath();
@@ -388,8 +389,8 @@ function drawCyl3D(ctx, P, x, y, r0, r1, z0, z1, sideHex, capHex0, capHex1, sunH
     ctx.fillStyle = hex; ctx.fill();
     ctx.strokeStyle = edge; ctx.lineWidth = 1.1; ctx.stroke();
   };
-  if (camZ > z1)      cap(T, capHex1, 'rgba(90,110,125,.75)');   // 相机在顶面之上 → 看到顶面
-  else if (camZ < z0) cap(B, capHex0, 'rgba(90,110,125,.75)');   // 相机在底面之下 → 看到底面
+  if (camZ > z1 && capHex1)      cap(T, capHex1, 'rgba(90,110,125,.75)');   // 相机在顶面之上 → 看到顶面
+  else if (camZ < z0 && capHex0) cap(B, capHex0, 'rgba(90,110,125,.75)');   // 相机在底面之下 → 看到底面
   // 相机介于两端面之间时两个端面都不可见（侧面遮挡），不画端面
 }
 // 头部箱体（偏航对齐镜面朝向）：wHalf 沿镜面宽度方向、dHalf 沿镜面法线水平方向；
@@ -496,7 +497,7 @@ function segHitsMirrorQuad(m, pose, cam, p) {
   const dMid = (M[0]-cam[0])*n[0] + (M[1]-cam[1])*n[1] + (M[2]-cam[2])*n[2];
   let tA = dMid/dn, tB = (dMid + dBack)/dn;  // 前、后面的交点参数
   if (tA > tB) { const t0 = tA; tA = tB; tB = t0; }
-  tA = Math.max(tA, 0.02); tB = Math.min(tB, 0.995);   // 须位于相机与目标点之间
+  tA = Math.max(tA, 0.02); tB = Math.min(tB, 0.999);   // 须位于相机与目标点之间（上限接近1：支架顶部贴近镜背面时交点 t 可达 0.99+）
   if (tB <= tA) return false;
   const toUV = t => {
     const ix = cam[0]+(p[0]-cam[0])*t - M[0], iy = cam[1]+(p[1]-cam[1])*t - M[1], iz = cam[2]+(p[2]-cam[2])*t - M[2];
