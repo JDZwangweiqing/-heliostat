@@ -37,6 +37,9 @@
   #planFloat h2 { font-size: 13px; color: #1a5b96; border-left: 4px solid #f5b301; padding-left: 6px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; }
   #planFloat h2 button, #chartFloat h2 button { pointer-events: auto; }
   #plan { width: 100%; height: 504px; display: block; cursor: pointer; }
+  /* 平面图下方：定日镜仰角定义说明 */
+  #planNote { margin-top: 5px; padding: 5px 8px; background: #f6fbff; border-left: 3px solid #f5b301; border-radius: 4px; font-size: 11px; line-height: 1.65; color: #46637d; }
+  #planNote b { color: #175a8e; }
 
   /* 曲线图放大浮动窗口（2 倍，可拖动，原窗口保留） */
   #chartFloat { position: absolute; left: 430px; top: 60px; width: 904px; z-index: 31; background: #fff; border-radius: 10px; box-shadow: 0 6px 24px rgba(20,60,100,.35); padding: 6px 10px 10px; font-size: 12px; color: #234; }
@@ -54,15 +57,15 @@
   .lgitem input { accent-color: #1a5b96; margin: 0; }
   #styleNote { font-size: 10px; color: #667788; margin-top: 2px; }
 
-  /* 镜面特写 3D 浮动窗口（位于 3D 区内，默认收起，可拖动） */
+  /* 镜面特写 3D 浮动窗口（位于 3D 区内，默认收起，可拖动；尺寸为初版 1.5 倍） */
   #zoomFold { position: absolute; right: 14px; top: 12px; z-index: 21; }
-  #zoomFloat { position: absolute; right: 14px; top: 40px; width: 430px; z-index: 20; background: #fff; border-radius: 10px; box-shadow: 0 6px 24px rgba(20,60,100,.35); padding: 6px 10px 10px; font-size: 12px; color: #234; }
-  #zoomFloat h2 { font-size: 13px; color: #1a5b96; border-left: 4px solid #f5b301; padding-left: 6px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; }
+  #zoomFloat { position: absolute; right: 14px; top: 40px; width: 645px; max-width: calc(100% - 28px); z-index: 20; background: #fff; border-radius: 10px; box-shadow: 0 6px 24px rgba(20,60,100,.35); padding: 8px 12px 12px; font-size: 13px; color: #234; }
+  #zoomFloat h2 { font-size: 15px; color: #1a5b96; border-left: 4px solid #f5b301; padding-left: 6px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; }
   #zoomFloat h2 button { pointer-events: auto; }
-  #zoomTabs { display: flex; gap: 6px; margin: 4px 0 5px; }
-  #zoomTabs button { flex: 1; border: 1.5px solid; border-radius: 5px; background: #f4f9fd; font-size: 11px; padding: 3px 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #zoomTabs { display: flex; gap: 6px; margin: 4px 0 6px; }
+  #zoomTabs button { flex: 1; border: 1.5px solid; border-radius: 5px; background: #f4f9fd; font-size: 13px; padding: 5px 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #zoomTabs button:disabled { cursor: default; background: #eef1f4; color: #aabbcc !important; border-color: #ccd6df !important; }
-  #zoomCanvas { width: 100%; height: 300px; display: block; border-radius: 6px; cursor: grab; }
+  #zoomCanvas { width: 100%; height: 450px; display: block; border-radius: 6px; cursor: grab; }
 
   /* 控件（紧凑排列，面板高度约为初版 5/6） */
   .row { display: flex; align-items: center; justify-content: space-between; margin: 5px 0; gap: 5px; }
@@ -109,6 +112,10 @@
   <div id="planFloat" style="display:none">
     <h2>俯视平面图 <span><span style="font-size:10px;color:#6a8aa4">点击镜面加入对比</span> <button class="foldBtn" id="planClose">收起 &#9650;</button></span></h2>
     <canvas id="plan"></canvas>
+    <div id="planNote">
+      <b>定日镜仰角</b>：定日镜镜面与地平面夹角的锐角值 —— 镜面水平放置时为 <b>0°</b>，镜面竖直时为 <b>90°</b>；
+      本图中定日镜沿环向布置、镜面始终自动跟踪太阳，其仰角随太阳高度角变化（正午前后镜面最平、仰角最小，清晨与傍晚镜面更陡、仰角增大）。当前各时刻数值见右侧「仰角与方位角日变化」曲线及镜面特写左上角。
+    </div>
   </div>
 
   <!-- ===== 右侧固定平面区：设置(顶) + 俯视平面图(可折叠) + 日变化曲线 ===== -->
@@ -298,6 +305,11 @@ function reflectDir(I, n) {
   const d = I[0]*n[0] + I[1]*n[1] + I[2]*n[2];
   return [I[0]-2*d*n[0], I[1]-2*d*n[1], I[2]-2*d*n[2]];
 }
+// 定日镜仰角：镜面与地平面夹角的锐角值 = 90° − 法线仰角 → acos(|n_z|)
+// （镜面水平时仰角 0°，镜面竖直时仰角 90°）
+function tiltOf(n) {
+  return Math.acos(Math.min(1, Math.abs(n[2]))) * R2D;
+}
 function mirrorPose(m, ss) {
   const T = [0, 0, REC_CENTER];
   const M = [m.x, m.y, MIRROR_H];
@@ -305,7 +317,7 @@ function mirrorPose(m, ss) {
   if (!ss.working) return null;
   if (Math.hypot(ss.s[0]+t[0], ss.s[1]+t[1], ss.s[2]+t[2]) < 1e-3) return null;
   const n = frontNormal(ss.s, t);
-  return { n, t, tilt: Math.asin(Math.max(-1,Math.min(1,n[2])))*R2D,
+  return { n, t, tilt: tiltOf(n),
            face: (Math.atan2(n[0],n[1])*R2D + 360) % 360 };
 }
 function poseAt(mIdx, clockMin) {
@@ -317,7 +329,7 @@ function poseAt(mIdx, clockMin) {
   const t = norm([T[0]-M[0], T[1]-M[1], T[2]-M[2]]);
   if (Math.hypot(ss.s[0]+t[0], ss.s[1]+t[1], ss.s[2]+t[2]) < 1e-3) return { tilt: NaN, face: NaN, elv };
   const n = frontNormal(ss.s, t);
-  return { tilt: Math.asin(Math.max(-1,Math.min(1,n[2])))*R2D,
+  return { tilt: tiltOf(n),
            face: (Math.atan2(n[0],n[1])*R2D + 360) % 360, elv };
 }
 
@@ -1346,13 +1358,15 @@ function drawZoom() {
   const dpr = window.devicePixelRatio || 1;
   cv.width = W*dpr; cv.height = H*dpr;
   const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  // 特写窗口为初版 1.5 倍，画布内的字号 / 图标 / 标注同步放大，保持原有观感比例
+  const ZS = Math.max(1, Math.min(W/430, H/300));
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,'#a8d8ef'); g.addColorStop(1,'#e3f4fb');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
   const slot = zoomActiveSlot();
   if (slot < 0) {
-    ctx.fillStyle = '#5a7ea6'; ctx.font = '13px "Microsoft YaHei"';
+    ctx.fillStyle = '#5a7ea6'; ctx.font = `${Math.round(13*ZS)}px "Microsoft YaHei"`;
     ctx.fillText('尚未选择定日镜：请在右侧下拉框、场景或平面图中点选镜面', 14, H/2 - 6);
     return;
   }
@@ -1406,7 +1420,7 @@ function drawZoom() {
   ctx.beginPath(); ctx.moveTo(qa.x,qa.y); ctx.lineTo(qb.x,qb.y); ctx.stroke();
   ctx.setLineDash([]);
   // 虚线尽头标注东南西北方位名称：端点在画布外时钳制到虚线与画布边缘的交点处
-  ctx.font = 'bold 13px "Microsoft YaHei"';
+  ctx.font = `bold ${Math.round(13*ZS)}px "Microsoft YaHei"`;
   const qg = P([m.x, m.y, 0]);
   [[m.x-RG, m.y, '西'], [m.x+RG, m.y, '东'], [m.x, m.y-RG, '南'], [m.x, m.y+RG, '北']].forEach(([wx, wy, t]) => {
     const p3 = [wx, wy, 0];
@@ -1580,14 +1594,15 @@ function drawZoom() {
       ctx.fillStyle = '#e59400';
       ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(ex + ux*13, ey + uy*13);
-      ctx.lineTo(ex - ux*3 + uy*7, ey - uy*3 - ux*7);
-      ctx.lineTo(ex - ux*3 - uy*7, ey - uy*3 + ux*7);
+      const AH = 13*ZS, AW = 7*ZS, AB = 3*ZS;
+      ctx.moveTo(ex + ux*AH, ey + uy*AH);
+      ctx.lineTo(ex - ux*AB + uy*AW, ey - uy*AB - ux*AW);
+      ctx.lineTo(ex - ux*AB - uy*AW, ey - uy*AB + ux*AW);
       ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.font = 'bold 12px "Microsoft YaHei"';
+      ctx.font = `bold ${Math.round(12*ZS)}px "Microsoft YaHei"`;
       ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(255,255,255,.92)';
-      const tx = Math.min(W - 108, Math.max(6, ex - ux*20 - (ux > 0.3 ? 92 : 0)));
-      const ty = Math.min(H - 8, Math.max(14, ey - uy*16));
+      const tx = Math.min(W - 108*ZS, Math.max(6, ex - ux*20*ZS - (ux > 0.3 ? 92*ZS : 0)));
+      const ty = Math.min(H - 8*ZS, Math.max(14*ZS, ey - uy*16*ZS));
       ctx.strokeText('反射光→吸热器', tx, ty);
       ctx.fillText('反射光→吸热器', tx, ty);
     }});
@@ -1617,7 +1632,7 @@ function drawZoom() {
     const sp = [m.x + ss.s[0]*150, m.y + ss.s[1]*150, MIRROR_H + ss.s[2]*150];
     if (depOf(sp) > 5) {
       const qs = P(sp);
-      if (qs.x > -40 && qs.x < W+40 && qs.y > -40 && qs.y < H+40) drawSunIcon(ctx, qs.x, qs.y, 11);
+      if (qs.x > -40 && qs.x < W+40 && qs.y > -40 && qs.y < H+40) drawSunIcon(ctx, qs.x, qs.y, 11*ZS);
     }
   }
   // 吸热器标注（须在相机前方才绘制）
@@ -1625,21 +1640,21 @@ function drawZoom() {
   if (depOf(rp) > 5) {
     const recL = P(rp);
     if (recL.x > -60 && recL.x < W+60 && recL.y > -40 && recL.y < H+40) {
-      ctx.font = 'bold 12px "Microsoft YaHei"';
+      ctx.font = `bold ${Math.round(12*ZS)}px "Microsoft YaHei"`;
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)';
-      ctx.strokeText('吸热器', recL.x + 10, recL.y - 6);
-      ctx.fillStyle = '#c07b00'; ctx.fillText('吸热器', recL.x + 10, recL.y - 6);
+      ctx.strokeText('吸热器', recL.x + 10*ZS, recL.y - 6*ZS);
+      ctx.fillStyle = '#c07b00'; ctx.fillText('吸热器', recL.x + 10*ZS, recL.y - 6*ZS);
     }
   }
   // 左上角信息
   const p = poseAt(state.sel[slot], state.timeMin);
-  ctx.font = 'bold 13px "Microsoft YaHei"';
+  ctx.font = `bold ${Math.round(13*ZS)}px "Microsoft YaHei"`;
   ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineJoin = 'round';
   const info = `镜${slot+1} ${m.id}　${isNaN(p.tilt) ? '停用（水平放置）' : `仰角 ${p.tilt.toFixed(1)}°　方位角 ${p.face.toFixed(1)}°`}`;
-  ctx.strokeText(info, 10, 20);
-  ctx.fillStyle = SEL_COLORS[slot]; ctx.fillText(info, 10, 20);
+  ctx.strokeText(info, 12*ZS, 20*ZS);
+  ctx.fillStyle = SEL_COLORS[slot]; ctx.fillText(info, 12*ZS, 20*ZS);
   // 操作提示（右下角）
-  ctx.font = '10px "Microsoft YaHei"';
+  ctx.font = `${Math.round(10*ZS)}px "Microsoft YaHei"`;
   ctx.textAlign = 'right';
   ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.85)';
   const hintZ = state.zoomCam[slot]
